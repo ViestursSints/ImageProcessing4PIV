@@ -4,6 +4,7 @@ import cv2 as cv
 from matplotlib import pyplot as plt
 import multiprocessing
 import scipy.signal as signl
+import cupy as cp
 
 # Function to read a pair of images from a multi-image .tif file
 # Refer to readme for folder and file naming conventions used
@@ -65,20 +66,29 @@ def show_histogram(image, n_bins=52, cutoff_f=0.0025, dev_one = 2, wide = 1):
      low_end_1 = np.where(hist == sufficiently_large[0])[0]
      low_end_2 = peaks[-1] + \
             dev_one*(properties["right_ips"][-1] - properties["left_ips"][-1])
+     if not(isinstance(low_end_1, np.float64)):
+          if len(low_end_1) > 1:
+               low_end_1 = low_end_1[0]
+     if not(isinstance(low_end_2, np.float64)):
+          if len(low_end_2) > 1:
+               low_end_2 = low_end_2[0]
+     if not(isinstance(high_end, np.float64)):
+          if len(high_end) > 1:
+               high_end = high_end[-1]
      plt.plot(hist)
      plt.plot(peaks, hist[peaks], "X")
      plt.hlines(y=properties["width_heights"], xmin=properties["left_ips"],
-           xmax=properties["right_ips"], color = "C1")
+           xmax=properties["right_ips"], color = "wheat")
      plt.vlines(x=low_end_1, ymin=0,
-           ymax = hist[peaks[0]], color = "C1")
+           ymax = hist[peaks[0]], color = "red")
      plt.vlines(x=low_end_2, ymin=0,
-           ymax = hist[peaks[-1]], color = "C1")
+           ymax = hist[peaks[-1]], color = "orchid", linestyle="--")
      if len(hist[peaks]) > 1:
           plt.vlines(x=high_end, ymin=0,
-               ymax = hist[peaks[1]], color = "C1")
+               ymax = hist[peaks[1]], color = "teal", linestyle=":")
      else:
           plt.vlines(x=high_end, ymin=0,
-               ymax = hist[peaks[0]], color = "C1")
+               ymax = hist[peaks[0]], color = "teal", linestyle=":")
      plt.show()
 
 # Function for image gamma correction, takes image and gamma as arguments
@@ -113,15 +123,28 @@ def historic_cut(image_uncut, cutoff_f = 0.0025, n_bins = 52,
                   cut_method = 'sym_side', dev_one = 2, wide = 1):
      hist, bin_edges = np.histogram(image_uncut, n_bins, [0,256])
      sufficiently_large = hist[hist>cutoff_f*np.sum(hist)]
-     high_end = bin_edges[np.where(hist == sufficiently_large[-1])][0]
+     high_end = np.where(hist == sufficiently_large[-1])
      if cut_method == 'sym_side':
-          low_end = bin_edges[np.where(hist == sufficiently_large[0])][0]
+          low_end = np.where(hist == sufficiently_large[0])
      elif cut_method == 'off_first_peak':
-          hist, bin_edges = np.histogram(image_uncut, n_bins, [0,256])
+          #hist, bin_edges = np.histogram(image_uncut, n_bins, [0,256])
           peaks, properties = signl.find_peaks(hist, width=wide, prominence=0.05e5)
-          low_end = bin_edges[int(peaks[-1] + \
-            dev_one*(properties["right_ips"][-1] - properties["left_ips"][-1]))]
-     return low_end, high_end
+          low_end = int(peaks[-1] + \
+            dev_one*(properties["right_ips"][-1] - properties["left_ips"][-1]))
+     if isinstance(low_end, np.ndarray):
+          if len(low_end) > 1:
+               low_end = low_end[0]
+     if isinstance(high_end, np.ndarray):
+          if len(high_end) > 1:
+               high_end = high_end[-1]
+     high_end_val = bin_edges[high_end]; low_end_val = bin_edges[low_end]
+     if isinstance(low_end_val, np.ndarray):
+          if len(low_end_val) > 1:
+               low_end_val = low_end_val[0]
+     if isinstance(high_end_val, np.ndarray):
+          if len(high_end_val) > 1:
+               high_end_val = high_end_val[-1]
+     return low_end_val, high_end_val
 
 # Translates the value of a pixel from a default interval of (0,255) to (lev1,lev2)
 def stretch_dc(the_pixel, lev1, lev2):
@@ -131,13 +154,24 @@ def stretch_dc(the_pixel, lev1, lev2):
 
 stretch_vector = np.vectorize(stretch_dc)
 
+# !!! CHECK IF FASTER !!!
+def stretch_dc_fast(pixels, lev1, lev2):
+    return np.clip((pixels - lev1) * (255 / (lev2 - lev1)), 0, 255)
+
+# !!! GPU acceleration - check!
+
+def stretch_dc_gpu(pixels, lev1, lev2):
+    return cp.clip((pixels - lev1) * (255 / (lev2 - lev1)), 0, 255)
+
 # ONE OF TWO PRIMARY PREPROCESSING METHODS
 # Applies the "stretch_dc" function to an image, with an option to perform gamma corr.
 # Pixel intensity values will be translated to interval (cut_low, cut_high)
 def method_stretch(image, cut_low, cut_high, gamma = False):
      if gamma:
           image = gamma_correction_table(image, gamma)
-     im_cut = stretch_vector(image, cut_low, cut_high)
+     #im_cut = stretch_vector(image, cut_low, cut_high)
+     #im_cut = stretch_dc_fast(image, cut_low, cut_high)
+     im_cut = stretch_dc_gpu(image, cut_low, cut_high)
      return im_cut
 
 # Obtains background image for an image sequence (mean for the sequence)
@@ -261,6 +295,9 @@ def subsequence_two(im_n, image_folder, run_n, high_kern, low_kern,
 # Applies gamma correction (optional) and histogram stretching
 # If out_fold (output folder) given: applies to image sequence, writes resutls to file
 # Otherwise: applies to image pair, displays results (use for testing)
+
+# !!! TEST BATCHING??? !!!
+
 def sequence_stretch(image_fold, run_n, gamma = False,
                   image_range = 99, cutoff_f = 0.002, show_it = False, out_fold = False,
                     c_meth = 'sym_side', dev_one = 2, ends = False, back = False, wide=1):
@@ -291,8 +328,8 @@ def sequence_stretch(image_fold, run_n, gamma = False,
      else:
           im_1, im_2 = open_images_piv(image_fold, run_n, 0, id_this_run, ends)
 
-          im_processed_1 = method_stretch(im_1, cut_low_1, cut_high_1, cutoff_f, gamma)
-          im_processed_2 = method_stretch(im_2, cut_low_2, cut_high_2, cutoff_f, gamma)
+          im_processed_1 = method_stretch(im_1, cut_low_1, cut_high_1, gamma)
+          im_processed_2 = method_stretch(im_2, cut_low_2, cut_high_2, gamma)
 
           if show_it:
                image_preparation(im_processed_1, show_it)
@@ -310,8 +347,8 @@ def stretch_subsequence(image_numb, id_this_run, image_fold,
      
      im_1, im_2 = open_images_piv(image_fold, run_n, image_numb, id_this_run, ends)
 
-     im_processed_1 = method_stretch(im_1, cut_low_1, cut_high_1, cutoff_f, gamma)
-     im_processed_2 = method_stretch(im_2, cut_low_2, cut_high_2, cutoff_f, gamma)
+     im_processed_1 = method_stretch(im_1, cut_low_1, cut_high_1, gamma)
+     im_processed_2 = method_stretch(im_2, cut_low_2, cut_high_2, gamma)
 
      im_out_name = out_fold + "/prestretch/slice_" + str(run_n).zfill(3) + \
                "/" + str(image_numb*2).zfill(3) + ".png"
@@ -329,6 +366,7 @@ def stretch_subsequence(image_numb, id_this_run, image_fold,
 def sequence_stretch_para(image_fold, run_n, core_n, gamma = False,
                   image_range = 99, cutoff_f = 0.002, out_fold = False,
                     c_meth = 'sym_side', dev_one = 2, ends = False, wide = 1):
+     cv.setNumThreads(0)
      id_this_run = name_runs(run_n, image_fold)
      
      try:
@@ -353,12 +391,15 @@ def sequence_stretch_para(image_fold, run_n, core_n, gamma = False,
      args = [(i , id_this_run, image_fold, cut_low_1, cut_high_1, cut_low_2, cut_high_2,
                run_n, gamma, cutoff_f, out_fold, ends) for i in range(0,image_range+1)]
      pool.starmap(stretch_subsequence, args)
+     pool.close()
+     pool.join()
 
 # Applies histogram stretching, gamma correction & high/low pass to an image sequence
 # image_fold is the folder containing histogram stretched image subfolders
 # Parallelized
 def sequence_many(image_fold, run_n, core_n, image_range = 99, all_range = 99,
                    high_kern = 5, low_kern = 2, back = False, extra_juice = False):
+     cv.setNumThreads(0)
      if back:
           back_im_1, back_im_2 = obtain_background(image_fold, run_n,
                                                'stretched', all_range)
@@ -380,3 +421,5 @@ def sequence_many(image_fold, run_n, core_n, image_range = 99, all_range = 99,
      
      pool = multiprocessing.Pool(core_n)
      pool.starmap(subsequence_two, args)
+     pool.close()
+     pool.join()
