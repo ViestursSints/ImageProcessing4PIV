@@ -103,7 +103,7 @@ def settings_set_genex1(im_folder, ch, type, windows, overlaps, iter_n,
         )
 
     settings.save_path = str(base_path / 'PIV_output')
-    settings.save_folder_suffix = '1_'
+    settings.save_folder_suffix = '1_' + str(ch).zfill(3)
 
     settings.correlation_method = 'linear'
     settings.normalized_correlation = normc
