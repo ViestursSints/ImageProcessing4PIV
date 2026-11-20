@@ -81,46 +81,39 @@ def settings_set_test(im_folder, slice_n, windows, overlaps, iter_n = 5,
     return settings
 
 def settings_set_genex1(im_folder, ch, type, windows, overlaps, iter_n,
-                 std_thresh = 1, med_thresh = 3, normc = True):
+                        std_thresh=1, med_thresh=3, normc=True):
+
     settings = windef.PIVSettings()
-    #settings = windef.Settings()
+
+    base_path = pathlib.Path(im_folder)
+
     if type == 'enhanced':
-        settings.filepath_images = im_folder + "ch" + \
-        str(ch) + '/1/2 Enhanced Images'
+        settings.filepath_images = str(
+            base_path / f'ch{ch}' / '1' / '2 Enhanced Images'
+        )
+
     elif type == 'masks':
-        settings.filepath_images = im_folder + "ch" + \
-        str(ch) + '/1/3 Particle Masks'
+        settings.filepath_images = str(
+            base_path / f'ch{ch}' / '1' / '3 Particle Masks'
+        )
+
     else:
-        print("You were supposed to choose either 'enhanced' or 'masks' for the type argument. Please try again.")
-    
-    settings.save_path = im_folder + '/PIV_output'
+        raise ValueError(
+            "You were supposed to choose either 'enhanced' or 'masks' for the type argument. Please try again."
+        )
+
+    settings.save_path = str(base_path / 'PIV_output')
     settings.save_folder_suffix = '1_'
 
     settings.correlation_method = 'linear'
     settings.normalized_correlation = normc
-
     settings.num_iterations = iter_n
-
-    settings.windowsizes = windows # (248, 164, 84, 64, 32)
-    settings.overlap = overlaps # (132, 112, 32, 22, 16)
-
+    settings.windowsizes = windows
+    settings.overlap = overlaps
     settings.sig2noise_method = 'peak2peak'
-    #settings.sig2noise_method = 'peak2mean'
-
     settings.validation_first_pass = False
-
-    #settings.min_max_u_disp = (-40, 40)
-    #settings.min_max_v_disp = (-40, 40)
-
-    settings.std_threshold = std_thresh  # threshold of the std validation
-
-    settings.median_threshold = med_thresh  # threshold of the median validation
-
-    #settings.sig2noise_mask = 5
-    #settings.extract_sig2noise = False
-
-    #settings.do_sig2noise_validation = False
-
+    settings.std_threshold = std_thresh
+    settings.median_threshold = med_thresh
     settings.show_plot = False
 
     return settings
@@ -303,3 +296,30 @@ def displayer_mt2_genex1(fn, im_folder, window = 32):
         #image_name= im_folder + "/3 Particle Masks" + '/' + im_name1
         #image_name= im_folder + "/Gammad" + '/' + im_name1
     );
+
+def displayer_mt2_genex2(fn, im_folder, window=32):
+
+    base_path = pathlib.Path(im_folder)
+
+    field_path = (
+        base_path / 'PIV_output' /
+        f'OpenPIV_results_{int(window)}_1_' /
+        f'field_A00{str(fn).zfill(2)}.txt'
+    )
+
+    image_path = (
+        base_path / '1' / '2 Enhanced Images' /
+        'Frame_1.tiff'
+    )
+
+    fig_v, ax_v = plt.subplots(figsize=(8, 8))
+
+    tools.display_vector_field(
+        field_path,
+        ax=ax_v,
+        scaling_factor=1,
+        scale=100,       # Arrow length
+        width=0.003,     # Arrow thickness
+        on_img=True,
+        image_name=str(image_path)
+    )
